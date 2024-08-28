@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Simulador de Plantio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body {
+  font-family: sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  margin: 0;
+  padding: 10px; /* Adiciona um espaçamento interno */
+  box-sizing: border-box; /* Inclui padding e border no width/height */
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  width: 95%; /* Ocupa 95% da largura da tela */
+  max-width: 400px; /* Largura máxima do formulário */
+  padding: 20px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+}
+
+input[type="number"] {
+  margin-bottom: 15px;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 16px; /* Aumenta o tamanho da fonte */
+}
+
+button {
+  padding: 12px 20px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 18px; /* Aumenta o tamanho da fonte */
+}
+
+#resultados {
+  margin-top: 20px;
+  font-size: 18px;
+  text-align: center;
+  display:block;
+  flex-direction: column;
+  align-items: center;
+}
+
+.gauge {
+    width: 200px;
+    height: 100px;
+    margin-bottom: 20px;
+}
+
+.gauge svg {
+    overflow: visible;
+}
+
+.gauge-arrow {
+    stroke: red;
+    stroke-width: 2;
+    fill: red;
+    transform-origin: 10px 100px; /* Define o ponto de rotação da agulha*/
+    transform: rotate(0deg); /* Posição inicial da agulha*/
+    transition: transform 0.5s ease-in-out; /* Adiciona uma transição suave*/
+}
+</style>
+</head>
+<body>
+  <h1>Simulador de Plantio</h1>
+
+  <form id="formularioEntrada">
+    Furos no Disco: <input type="number" id="furos" value="0" min="1"><br>
+    Velocidade de Plantio (km/h): <input type="number" id="velocidade" value="0.0" min="0.1" step="0.1"><br>
+    Taxa de Semeadura (sementes/m): <input type="number" id="taxa" value="0" min="1"><br>
+    <button type="submit" id="iniciarSimulacao" style="display: block;">Iniciar Simulação</button>
+    <button type="button" id="cancelarSimulacao" style="display: none;">Cancelar</button>
+  </form>
+  <div id="resultados">
+    Contagem de Sementes: <span id="contagemSementes">0</span><br>
+    <div class="gauge">
+        <svg viewBox="0 0 200 100">
+            <path d="M 10 100 A 90 90 0 0 1 190 100" stroke="black" stroke-width="5" fill="none" />
+            <line class="gauge-arrow" id="falhas-arrow" x1="10" y1="100" x2="100" y2="100" />
+            <text x="100" y="60" text-anchor="middle" font-size="14">Falhas: <span id="falhas">0</span>%</text>
+          </svg>
+        </div>
+        <div class="gauge">
+          <svg viewBox="0 0 200 100">
+            <path d="M 10 100 A 90 90 0 0 1 190 100" stroke="black" stroke-width="5" fill="none" />
+            <line class="gauge-arrow" id="duplas-arrow" x1="10" y1="100" x2="100" y2="100" />
+            <text x="100" y="60" text-anchor="middle" font-size="14">Duplas: <span id="duplas">0</span>%</text>
+        </svg>
+      </div>
+    <!-- Falhas: <span id="falhas">0</span><br> -->
+    <!-- Duplas: <span id="duplas">0</span><br> -->
+    RPM Calculado: <span id="rpmCalculado">0</span><br>
+    Tempo restante: <span id="tempo">00:00.00.000</span>
+    </div>
+  </div>
+
+  <script>
+    const formulario = document.getElementById('formularioEntrada');
+    const botaoIniciar = document.getElementById('iniciarSimulacao');
+    const botaoCancelar = document.getElementById('cancelarSimulacao');
+    const divResultados = document.getElementById('resultados');
+    const tempoSpan = document.getElementById('tempo');
+    const falhasArrow = document.getElementById('falhas-arrow');
+    const falhasSpan = document.getElementById('falhas');
+    const duplasArrow = document.getElementById('duplas-arrow');
+    const duplasSpan = document.getElementById('duplas');
+
+    let tempoDecorrido = 0;
+    let timerInterval;
+
+    formulario.addEventListener('submit', (evento) => {
+      evento.preventDefault(); 
+
+      const furos = document.getElementById('furos').value;
+      const velocidade = document.getElementById('velocidade').value;
+      const taxa = document.getElementById('taxa').value;
+
+      // Aqui você normalmente enviaria os dados para o ESP32
+      // usando AJAX ou a API fetch. Por enquanto, vamos apenas registrá-los.
+      console.log("Furos:", furos);
+      console.log("Velocidade:", velocidade);
+      console.log("Taxa:", taxa); 
+
+      // Desabilita os campos de entrada e o botão Iniciar
+      desabilitarCampos();
+      botaoCancelar.style.display = 'block';
+
+      // Inicia o timer e desabilitar botão de iniciar
+      iniciarTimer();
+      botaoIniciar.style.display = 'none';
+
+      botaoCancelar.addEventListener('click', () => {
+        pararTimer();
+        habilitarCampos();
+        botaoCancelar.style.display = 'none';
+        botaoIniciar.style.display = 'block';
+        tempoSpan.textContent = "00:00:00.000";
+        // Redefine os velocímetros para 0%
+        atualizarVelocimetro(falhasArrow, falhasSpan, 0);
+        atualizarVelocimetro(duplasArrow, duplasSpan, 0);
+      });
+
+      function iniciarTimer() {
+        clearInterval(timerInterval); // Limpa qualquer timer anterior
+        tempoDecorrido = 0;
+        timerInterval = setInterval(() => {
+            tempoDecorrido += 10;
+            const totalSegundos = Math.floor(tempoDecorrido / 1000);
+            const minutos = Math.floor(totalSegundos / 60);
+            const segundos = totalSegundos % 60;
+            const milisegundos = tempoDecorrido %1000;
+            
+            tempoSpan.textContent = `${minutos.toString().padStart(2, '0')}:${segundos.toString().padStart(2, '0')}:${milisegundos.toString().padStart(3, '0')}`;
+
+            if (tempoDecorrido >= 180000) {
+                pararTimer();
+                habilitarCampos();
+                botaoCancelar.style.display = 'none';
+                botaoIniciar.style.display = 'block';
+
+                // Em um aplicativo real, você receberia dados de volta do ESP32
+                // e atualizaria a div resultados com os dados da simulação.
+                // Para este exemplo, vamos simular alguns resultados:
+                // Simula os resultados após o timer terminar
+                document.getElementById('contagemSementes').textContent = Math.floor(Math.random() * 4000);
+                //document.getElementById('falhas').textContent = Math.floor(Math.random() * 50);
+                //document.getElementById('duplas').textContent = Math.floor(Math.random() * 50);
+                const falhas = Math.floor(Math.random() * 11); // Valor aleatório de 0 a 10%
+                const duplas = Math.floor(Math.random() * 11); // Valor aleatório de 0 a 10%
+                atualizarVelocimetro(falhasArrow, falhasSpan, falhas);
+                atualizarVelocimetro(duplasArrow, duplasSpan, duplas);
+                document.getElementById('rpmCalculado').textContent = (Math.random() * 50).toFixed(2);
+            }
+            else {
+                // Simula valores aleatórios para falhas e duplas durante a simulação
+                const falhas = Math.floor(Math.random() * 11);
+                const duplas = Math.floor(Math.random() * 11);
+                atualizarVelocimetro(falhasArrow, falhasSpan, falhas);
+                atualizarVelocimetro(duplasArrow, duplasSpan, duplas);
+            }
+        }, 10);
+      }
+      function pararTimer() {
+      clearInterval(timerInterval);
+      }
+
+      function desabilitarCampos() {
+        const inputs = formulario.querySelectorAll('input');
+        inputs.forEach(input => input.disabled = true);
+        formulario.querySelector('button[type="submit"]').disabled = true;
+      }
+
+      function habilitarCampos() {
+        const inputs = formulario.querySelectorAll('input');
+        inputs.forEach(input => input.disabled = false);
+        formulario.querySelector('button[type="submit"]').disabled = false;
+      }
+
+      function atualizarVelocimetro(arrow, span, valor) {
+        // Define o ângulo inicial como -90 graus para que o ponteiro comece na esquerda
+        const anguloInicial = 0; 
+        // Calcula o ângulo de rotação com base no valor e adiciona ao ângulo inicial
+        const angulo = anguloInicial + (valor * 18);
+        arrow.style.transform = `rotate(${angulo}deg)`;
+        span.textContent = valor;
+      }
+
+      botaoCancelar.addEventListener('click', () => {
+        if (confirm("Tem certeza que deseja cancelar a simulação?")) {
+            pararTimer();
+            habilitarCampos();
+            botaoCancelar.style.display = 'none';
+            botaoIniciar.style.display = 'block';
+            tempoSpan.textContent = "00:00:00.000";
+        }
+      });
+    });
+  </script>
+
+</body>
+</html>
